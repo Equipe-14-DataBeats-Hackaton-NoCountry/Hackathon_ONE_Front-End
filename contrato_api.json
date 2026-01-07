@@ -1,0 +1,35 @@
+{
+    "endpoint": "POST /predict",
+    "metadata": {
+        "model_name": "Spotify Churn Model",
+        "model_version": "1.0",
+        "api_standard": "RESTful"
+    },
+    "payload_input": {
+        "gender": "Other",
+        "age": 27,
+        "country": "US",
+        "subscription_type": "Free",
+        "listening_time": 284,
+        "songs_played_per_day": 57,
+        "skip_rate": 0.14,
+        "device_type": "Desktop",
+        "ads_listened_per_week": 41,
+        "offline_listening": 0,
+        "songs_per_minute": 0.2,
+        "ad_intensity": 0.1025,
+        "frustration_index": 5.880000000000001,
+        "is_heavy_user": 1,
+        "premium_no_offline": 0
+    },
+    "expected_response": {
+        "prediction": "Vai Cancelar",
+        "probability": 0.5396,
+        "decision_threshold": 0.431019,
+        "ai_diagnosis": {
+            "primary_risk_factor": "Anúncios por Semana",
+            "primary_retention_factor": "Uso Offline",
+            "suggested_action": "Priorizar oferta de retenção"
+        }
+    }
+}

@@ -1,0 +1,12 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #121212;
+  font-family: 'Inter', system-ui, Arial, sans-serif;
+  color: white;
+  overflow-x: hidden; /* Evita scroll lateral indesejado */
+}

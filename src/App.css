@@ -1,0 +1,51 @@
+/* Layout Principal */
+.container {
+  padding: 24px;
+  max-width: 1400px;
+  margin: auto;
+  text-align: left; /* Corrige o centralizado do Vite */
+}
+
+/* Grid de Cards Superiores (Métricas) */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+/* Grid de Gráficos */
+.charts {
+  display: grid;
+  grid-template-columns: 1fr 2fr; /* Pizza menor, Barras maior */
+  gap: 32px;
+  margin-bottom: 32px;
+  align-items: start;
+}
+
+/* Estilo unificado para os Cards */
+.card {
+  background: #181818;
+  padding: 1.5rem;
+  border-radius: 12px;
+  border: 1px solid #282828;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+/* Responsividade para Tablets e Mobile */
+@media (max-width: 1000px) {
+  .charts {
+    grid-template-columns: 1fr; /* Empilha os gráficos */
+  }
+  
+  .container {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 600px) {
+  .metrics {
+    grid-template-columns: 1fr 1fr; /* 2 colunas no telemóvel */
+  }
+}
