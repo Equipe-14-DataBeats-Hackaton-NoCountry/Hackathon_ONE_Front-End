@@ -55,19 +55,20 @@ export function PredictionForm() {
   const { predict, loading, error, result } = usePrediction();
 
   // Estado do formulário inicializado com valores padrão
-  const [formData, setFormData] = useState({
-    user_id: '',
-    gender: 'Male',
-    age: 25,
-    country: 'BR',
-    subscription_type: 'Free',
-    listening_time: 300,
-    songs_played_per_day: 20,
-    skip_rate: 0.2,
-    ads_listened_per_week: 10,
-    device_type: 'Mobile',
-    offline_listening: false,
-  });
+const [formData, setFormData] = useState({
+  user_id: "",
+  gender: "Male",
+  age: 25,
+  country: "BR",
+  subscription_type: "Free",
+  device_type: "Mobile",
+  listening_time: 300,
+  songs_played_per_day: 20,
+  skip_rate: 0.2,
+  ads_listened_per_week: 10,
+  offline_listening: false,
+});
+
 
   /**
    * Handler para mudanças em campos do formulário.
@@ -86,33 +87,27 @@ export function PredictionForm() {
    * Submete formulário para predição na API.
    * Realiza sanitização rigorosa dos dados para garantir compatibilidade com o Backend.
    */
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+const handleSubmit = async (e) => {
+  e.preventDefault();
 
-    // PREPARAÇÃO E SANITIZAÇÃO DO PAYLOAD
-    // Isso garante que o que sai do React é igual ao JSON do Postman
-    const payload = {
-      ...formData,
-      // Garante conversão para Número (evita envio de strings "25")
-      age: Number(formData.age) || 0,
-      listening_time: Number(formData.listening_time) || 0,
-      songs_played_per_day: Number(formData.songs_played_per_day) || 0,
-      skip_rate: Number(formData.skip_rate) || 0,
-      ads_listened_per_week: Number(formData.ads_listened_per_week) || 0,
-
-      // Garante booleano ou 0/1 (ajuste conforme sua API)
-      offline_listening: !!formData.offline_listening
-    };
-
-    // Debug: Compare este log com o Body do seu Postman
-    console.log("📤 Payload Sanitizado:", JSON.stringify(payload, null, 2));
-
-    try {
-      await predict(payload);
-    } catch (err) {
-      console.error('Erro na predição:', err);
-    }
+  const payload = {
+    ...formData,
+    age: Number(formData.age) || 0,
+    listening_time: Number(formData.listening_time) || 0,
+    songs_played_per_day: Number(formData.songs_played_per_day) || 0,
+    skip_rate: Number(formData.skip_rate) || 0,
+    ads_listened_per_week: Number(formData.ads_listened_per_week) || 0,
+    offline_listening: !!formData.offline_listening,
   };
+
+  console.log("📤 Payload Sanitizado:", JSON.stringify(payload, null, 2));
+
+  try {
+    await predict(payload);
+  } catch (err) {
+    console.error("Erro na predição:", err);
+  }
+};
 
   // =========================================================
   //  LÓGICA DE APRESENTAÇÃO (VISUAL DASHBOARD)
@@ -136,7 +131,7 @@ export function PredictionForm() {
   // 2. Preparação de dados (Fallback seguro)
   // Alguns backends retornam 'churn_probability' ou 'probability'
   const rawProbability = result?.probability !== undefined ? result.probability : (result?.churn_probability || 0);
-  const percentual = (rawProbability * 100).toFixed(1) + '%';
+  const percentual = Math.min(rawProbability * 100, 99.9).toFixed(1) + '%';
 
   // Utiliza threshold da API se disponível
   const threshold = result?.decision_threshold || 0.5;

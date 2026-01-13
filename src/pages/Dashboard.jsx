@@ -8,6 +8,7 @@ import { ClientSearch } from '../components/ClientSearch'
 import { useClients } from '../hooks/useClients'
 import { useData } from '../hooks/useData'
 import { motion } from 'framer-motion'
+import { getDashboardMetrics } from '../services/api'
 import { LayoutDashboard, User, Upload, Search, Activity, AlertTriangle } from 'lucide-react'
 
 export default function Dashboard() {
@@ -20,6 +21,23 @@ export default function Dashboard() {
     useEffect(() => {
         refreshClients();
         refreshMetrics();
+    }, []);
+
+     //>>> estados para os dados do endpoint /dashboard/metrics
+     const [summary, setSummary] = useState(null)
+     const [error, setError] = useState(null)
+
+    useEffect(() => 
+        { const load = async () => { 
+            try { 
+                const data = await getDashboardMetrics(); 
+                console.log("📊 Resposta da API /dashboard/metrics:", data);
+                setSummary(data); 
+            } catch (err) { 
+                setError("Falha ao carregar dados do dashboard"); 
+            } 
+        }; 
+        load(); 
     }, []);
 
     const engineDados = {
@@ -190,15 +208,38 @@ export default function Dashboard() {
                 </div>
             </motion.div>
 
-            {/* METRICS ROW */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '24px', marginBottom: '40px' }}>
-                <MetricCard title="Total de Clientes" value={metrics.totalClients} />
-                <MetricCard title="Taxa de Churn Global" value={`${metrics.globalChurnRate}%`} />
-                <MetricCard title="Clientes em Risco" value={metrics.highRiskCount} />
-                <MetricCard title="Receita em Risco (Est.)" value={`$${metrics.revenueAtRisk.toLocaleString()}`} />
-                <MetricCard title="Precisão do Modelo" value={`${metrics.modelAccuracy}%`} />
-            </div>
+            {!summary && !error && <p>Carregando dados...</p>}
+            {error && <p>{error}</p>}
 
+            <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+            gap: '24px', 
+            marginBottom: '40px' 
+            }}>
+            <MetricCard title="Total de Clientes" value={summary?.total_customers} />
+            
+            <MetricCard 
+                title="Taxa de Churn Global" 
+                value={`${summary?.global_churn_rate?.toFixed(1)}%`} 
+            />
+            
+            <MetricCard title="Clientes em Risco" value={summary?.customers_at_risk} />
+            
+            <MetricCard 
+                title="Receita em Risco (Est.)" 
+                value={new Intl.NumberFormat('pt-BR', { 
+                style: 'currency', 
+                currency: 'BRL' 
+                }).format(summary?.revenue_at_risk || 0)} 
+            />
+            
+            <MetricCard 
+                title="Precisão do Modelo" 
+                value={`${(summary?.model_accuracy * 100).toFixed(1)}%`} 
+            />
+            </div>
+    
             {/* TABS */}
             <div style={{ marginBottom: '30px', borderBottom: '1px solid #333', paddingBottom: '15px', display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
                 <button onClick={() => setActiveTab('dashboard')} style={tabStyle(activeTab === 'dashboard')}>

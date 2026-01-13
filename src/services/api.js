@@ -183,6 +183,15 @@ export const getTotalCount = async () => {
   }
 };
 
+/**
+ * Retorna métricas consolidadas do dashboard.
+ * Endpoint: /dashboard/metrics
+ */
+export const getDashboardMetrics = async () => {
+  return fetchWithAuth('/dashboard/metrics');
+};
+
+
 
 /**
  * Retrieves high-risk clients (churn probability > 70%).
@@ -333,4 +342,5 @@ export default {
   clearCache,
   API_CONFIG,
   getAggregates,
+  getDashboardMetrics
 };
