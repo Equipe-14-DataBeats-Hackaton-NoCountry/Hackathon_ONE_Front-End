@@ -55,20 +55,19 @@ export function PredictionForm() {
   const { predict, loading, error, result } = usePrediction();
 
   // Estado do formulário inicializado com valores padrão
-const [formData, setFormData] = useState({
-  user_id: "",
-  gender: "Male",
-  age: 25,
-  country: "BR",
-  subscription_type: "Free",
-  device_type: "Mobile",
-  listening_time: 300,
-  songs_played_per_day: 20,
-  skip_rate: 0.2,
-  ads_listened_per_week: 10,
-  offline_listening: false,
-});
-
+  const [formData, setFormData] = useState({
+    user_id: "",
+    gender: "Male",
+    age: 25,
+    country: "BR",
+    subscription_type: "Free",
+    device_type: "Mobile",
+    listening_time: 300,
+    songs_played_per_day: 20,
+    skip_rate: 0.2,
+    ads_listened_per_week: 10,
+    offline_listening: false,
+  });
 
   /**
    * Handler para mudanças em campos do formulário.
@@ -87,27 +86,27 @@ const [formData, setFormData] = useState({
    * Submete formulário para predição na API.
    * Realiza sanitização rigorosa dos dados para garantir compatibilidade com o Backend.
    */
-const handleSubmit = async (e) => {
-  e.preventDefault();
+  const handleSubmit = async (e) => {
+    e.preventDefault();
 
-  const payload = {
-    ...formData,
-    age: Number(formData.age) || 0,
-    listening_time: Number(formData.listening_time) || 0,
-    songs_played_per_day: Number(formData.songs_played_per_day) || 0,
-    skip_rate: Number(formData.skip_rate) || 0,
-    ads_listened_per_week: Number(formData.ads_listened_per_week) || 0,
-    offline_listening: !!formData.offline_listening,
+    const payload = {
+      ...formData,
+      age: Number(formData.age) || 0,
+      listening_time: Number(formData.listening_time) || 0,
+      songs_played_per_day: Number(formData.songs_played_per_day) || 0,
+      skip_rate: Number(formData.skip_rate) || 0,
+      ads_listened_per_week: Number(formData.ads_listened_per_week) || 0,
+      offline_listening: !!formData.offline_listening,
+    };
+
+    console.log("📤 Payload Sanitizado:", JSON.stringify(payload, null, 2));
+
+    try {
+      await predict(payload);
+    } catch (err) {
+      console.error("Erro na predição:", err);
+    }
   };
-
-  console.log("📤 Payload Sanitizado:", JSON.stringify(payload, null, 2));
-
-  try {
-    await predict(payload);
-  } catch (err) {
-    console.error("Erro na predição:", err);
-  }
-};
 
   // =========================================================
   //  LÓGICA DE APRESENTAÇÃO (VISUAL DASHBOARD)
@@ -130,37 +129,124 @@ const handleSubmit = async (e) => {
 
   // 2. Preparação de dados (Fallback seguro)
   // Alguns backends retornam 'churn_probability' ou 'probability'
-  const rawProbability = result?.probability !== undefined ? result.probability : (result?.churn_probability || 0);
+  const rawProbability =
+    result?.probability !== undefined
+      ? result.probability
+      : (result?.churn_probability || 0);
+
+  // OBS: mantive seu clamp pra evitar 100% cravado no UI
   const percentual = Math.min(rawProbability * 100, 99.9).toFixed(1) + '%';
 
   // Utiliza threshold da API se disponível
   const threshold = result?.decision_threshold || 0.5;
   const isHighRisk = rawProbability > threshold;
 
-  // 3. Simulação dos dados da imagem / Resposta da API
+  // 3. Status vindo da API
   // Prioriza 'prediction' (Insomnia) ou 'label'
   const apiStatus = result?.prediction || result?.label;
   const statusLabel = apiStatus || (isHighRisk ? 'Risco de Saída' : 'Cliente Seguro');
 
-  // Define cor baseado na resposta textual ou no risco calculado
-  // Se a resposta for "Vai Continuar", é seguro (Verde). Se for "Vai Sair" ou similar, é risco (Vermelho).
-  const isSafe = statusLabel === 'Vai Continuar' || statusLabel === 'Cliente Seguro' || (!apiStatus && !isHighRisk);
-  const statusColor = isSafe ? '#1DB954' : '#ff4d4d'; // Verde ou Vermelho
+  // =========================================================
+  //  CORES E NÍVEIS DE RISCO (Baixo / Moderado / Alto)
+  // =========================================================
+  const STATUS_LOW = 'Baixo Risco de Cancelamento';
+  const STATUS_MOD = 'Risco Moderado de Cancelamento';
+  const STATUS_HIGH = 'Alto Risco de Cancelamento';
+
+  // Thresholds para faixa interpretativa (padrão produto)
+  // Alinhado com backend:
+  // >= 0.60 Alto | >= 0.40 Moderado | < 0.40 Baixo
+  const LOW_MAX = 0.40;  // 0% - 40%
+  const MOD_MAX = 0.60; // 40% - 60%  (a partir de 60% já é alto)
+
+  const riskPalette = {
+    low: { color: '#1DB954', bg: '#1DB95420', border: '#1DB954' },   // verde
+    mod: { color: '#f1c40f', bg: '#f1c40f20', border: '#f1c40f' },   // amarelo
+    high: { color: '#ff4d4d', bg: '#ff4d4d20', border: '#ff4d4d' },  // vermelho
+    unknown: { color: '#b3b3b3', bg: '#b3b3b320', border: '#333' }
+  };
+
+  // Prioridade: texto do status (exato)
+  let riskLevel = 'unknown';
+
+  if (statusLabel === STATUS_LOW) riskLevel = 'low';
+  else if (statusLabel === STATUS_MOD) riskLevel = 'mod';
+  else if (statusLabel === STATUS_HIGH) riskLevel = 'high';
+  else {
+    // Fallback: se não vier nesses textos, usa probabilidade
+    const p = rawProbability; // 0..1
+    if (p >= MOD_MAX) riskLevel = 'high';
+    else if (p >= LOW_MAX) riskLevel = 'mod';
+    else riskLevel = 'low';
+  }
+
+  const statusColor = riskPalette[riskLevel].color;
+  const statusBorderColor = riskPalette[riskLevel].border;
+  const statusBg = riskPalette[riskLevel].bg;
+
+  // Badge label (enterprise)
+  const badgeText = riskLevel === 'low'
+    ? 'BAIXO RISCO'
+    : riskLevel === 'mod'
+      ? 'RISCO MODERADO'
+      : riskLevel === 'high'
+        ? 'ALTO RISCO'
+        : 'INDEFINIDO';
+
+  // Faixa interpretativa abaixo da probabilidade (enterprise)
+  const faixaInterpretativa = riskLevel === 'low'
+    ? `0–${Math.round(LOW_MAX * 100)}% → Baixo Risco`
+    : riskLevel === 'mod'
+      ? `${Math.round(LOW_MAX * 100)}–${Math.round(MOD_MAX * 100)}% → Risco Moderado`
+      : riskLevel === 'high'
+        ? `${Math.round(MOD_MAX * 100)}–100% → Alto Risco`
+        : 'Faixa não disponível';
+
+  // Badge style
+  const badgeStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '4px 10px',
+    borderRadius: '999px',
+    fontSize: '0.75rem',
+    fontWeight: '800',
+    letterSpacing: '0.5px',
+    color: '#000',
+    background: statusColor,
+    border: `1px solid ${statusBorderColor}`,
+    textTransform: 'uppercase',
+    lineHeight: '1',
+  };
 
   // Acesso seguro ao diagnóstico da IA (novo formato JSON)
   const diagnosis = result?.ai_diagnosis || {};
 
+  // =========================================================
+  //  FATOR DE RISCO / RETENÇÃO (AJUSTE DE CONSISTÊNCIA)
+  // =========================================================
+
   // Fator de risco (Pega da raiz ou do objeto de diagnóstico)
   const rawRiskFactor = result?.primary_risk_factor || diagnosis.primary_risk_factor;
-  const riskFactor = rawRiskFactor
+
+  // Regra: se for BAIXO risco, não faz sentido exibir fator "alarmista"
+  const hasRiskFactorFromApi = !!rawRiskFactor;
+  const showRiskFactorFromApi = (riskLevel === 'mod' || riskLevel === 'high') && hasRiskFactorFromApi;
+
+  const riskFactor = showRiskFactorFromApi
     ? traduzir(rawRiskFactor)
-    : (isHighRisk ? 'Comportamento de Risco' : 'Nenhum crítico');
+    : 'Nenhum fator de risco relevante identificado';
+
+  // Cor do fator de risco: segue semântica do nível (evita vermelho em baixo risco)
+  const riskFactorColor =
+    riskLevel === 'high' ? riskPalette.high.color :
+    riskLevel === 'mod' ? riskPalette.mod.color :
+    '#b3b3b3'; // neutro para baixo/unknown
 
   // Fator de retenção
   const rawRetentionFactor = diagnosis.primary_retention_factor;
   const retentionFactor = rawRetentionFactor
     ? traduzir(rawRetentionFactor)
-    : (formData.offline_listening ? 'Uso Offline' : 'Alta fidelidade');
+    : (formData.offline_listening ? 'Uso Offline' : 'Nenhum fator relevante identificado');
 
   // Ação sugerida
   const suggestedAction = result?.recommended_action || diagnosis.suggested_action;
@@ -264,16 +350,16 @@ const handleSubmit = async (e) => {
         {/* Botão de Envio */}
         <div style={{ gridColumn: 'span 2' }}>
           <button
-              type="submit"
-              disabled={loading}
-              style={{
-                ...buttonStyle,
-                opacity: loading ? 0.7 : 1,
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                gap: '10px'
-              }}
+            type="submit"
+            disabled={loading}
+            style={{
+              ...buttonStyle,
+              opacity: loading ? 0.7 : 1,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: '10px'
+            }}
           >
             {loading ? 'Calculando...' : <><Zap size={18} /> Prever Risco de Churn</>}
           </button>
@@ -282,94 +368,119 @@ const handleSubmit = async (e) => {
 
       {/* Erro */}
       {error && (
-          <div style={{
-            marginTop: '20px',
-            padding: '15px',
-            background: '#ff4d4d20',
-            border: '1px solid #ff4d4d',
-            borderRadius: '4px',
-            color: '#ff4d4d'
-          }}>
-            ❌ Erro: {error}
-          </div>
+        <div style={{
+          marginTop: '20px',
+          padding: '15px',
+          background: '#ff4d4d20',
+          border: '1px solid #ff4d4d',
+          borderRadius: '4px',
+          color: '#ff4d4d'
+        }}>
+          ❌ Erro: {error}
+        </div>
       )}
 
       {/* Resultado estilo Dashboard */}
       {result && !error && (
+        <div style={{
+          marginTop: '30px',
+          background: '#121212',
+          borderRadius: '6px',
+          borderLeft: `6px solid ${statusBorderColor}`, // Borda indicativa
+          padding: '25px',
+          boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
+          outline: `1px solid ${statusBg}` // realce sutil
+        }}>
+
+          {/* Título: Diagnóstico */}
+          <h4 style={{
+            color: statusColor,
+            margin: '0 0 20px 0',
+            fontSize: '1.1rem',
+            fontWeight: 'bold'
+          }}>
+            Diagnóstico: {formData.user_id || 'Cliente Anônimo'}
+          </h4>
+
+          {/* Layout Flexbox: Esquerda (Probabilidade) vs Direita (Detalhes) */}
           <div style={{
-            marginTop: '30px',
-            background: '#121212', // Fundo bem escuro (contraste dashboard)
-            borderRadius: '6px',
-            borderLeft: `6px solid ${statusColor}`, // Borda lateral indicativa
-            padding: '25px',
-            boxShadow: '0 4px 15px rgba(0,0,0,0.3)'
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '30px',
+            alignItems: 'center'
           }}>
 
-            {/* Título: Diagnóstico */}
-            <h4 style={{
-              color: statusColor,
-              margin: '0 0 20px 0',
-              fontSize: '1.1rem',
-              fontWeight: 'bold'
-            }}>
-              Diagnóstico: {formData.user_id || 'Cliente Anônimo'}
-            </h4>
+            {/* Coluna Esquerda: Probabilidade em destaque */}
+            <div style={{ flex: '1', minWidth: '150px' }}>
+              <p style={{ color: '#b3b3b3', fontSize: '0.9rem', marginBottom: '5px', fontWeight: 'bold' }}>
+                Probabilidade de Churn:
+              </p>
 
-            {/* Layout Flexbox: Esquerda (Probabilidade) vs Direita (Detalhes) */}
-            <div style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '30px',
-              alignItems: 'center'
-            }}>
-
-              {/* Coluna Esquerda: Probabilidade em destaque */}
-              <div style={{ flex: '1', minWidth: '150px' }}>
-                <p style={{ color: '#b3b3b3', fontSize: '0.9rem', marginBottom: '5px', fontWeight: 'bold' }}>
-                  Probabilidade de Churn:
-                </p>
-                <div style={{
-                  fontSize: '3.5rem',
-                  fontWeight: '800',
-                  color: statusColor,
-                  lineHeight: '1'
-                }}>
-                  {percentual}
-                </div>
+              <div style={{
+                fontSize: '3.5rem',
+                fontWeight: '800',
+                color: statusColor,
+                lineHeight: '1'
+              }}>
+                {percentual}
               </div>
 
-              {/* Coluna Direita: Lista de Fatores */}
-              <div style={{ flex: '2', display: 'flex', flexDirection: 'column', gap: '12px', borderLeft: '1px solid #333', paddingLeft: '20px' }}>
-
-                {/* Linha Status */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ color: 'white', fontWeight: 'bold' }}>Status:</span>
-                  <span style={{ color: statusColor, fontWeight: 'bold' }}>{statusLabel}</span>
-                </div>
-
-                {/* Linha Fator de Risco */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ color: 'white', fontWeight: 'bold' }}>Fator de Risco:</span>
-                  <span style={{ color: '#ff4d4d' }}>{riskFactor}</span>
-                </div>
-
-                {/* Linha Fator de Retenção */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ color: 'white', fontWeight: 'bold' }}>Fator de Retenção:</span>
-                  <span style={{ color: '#1DB954' }}>{retentionFactor}</span>
-                </div>
-
-                 {/* Action Recommended integrated here if available */}
-                 {suggestedAction && (
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                          <span style={{ color: 'white', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Recomendação:</span>
-                          <span style={{ color: '#b3b3b3' }}>{suggestedAction}</span>
-                      </div>
-                  )}
-
+              {/* Faixa interpretativa (enterprise) */}
+              <div style={{
+                marginTop: '10px',
+                padding: '8px 10px',
+                borderRadius: '6px',
+                background: statusBg,
+                border: `1px solid ${statusBorderColor}`,
+                color: 'white',
+                fontSize: '0.85rem',
+                fontWeight: '700',
+                width: 'fit-content'
+              }}>
+                {faixaInterpretativa}
               </div>
             </div>
+
+            {/* Coluna Direita: Lista de Fatores */}
+            <div style={{
+              flex: '2',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              borderLeft: '1px solid #333',
+              paddingLeft: '20px'
+            }}>
+
+              {/* Linha Status + Badge */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <span style={{ color: 'white', fontWeight: 'bold' }}>Status:</span>
+                <span style={{ color: statusColor, fontWeight: 'bold' }}>{statusLabel}</span>
+                <span style={badgeStyle}>{badgeText}</span>
+              </div>
+
+              {/* Linha Fator de Risco (AGORA CONSISTENTE E SEM VERMELHO EM BAIXO RISCO) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ color: 'white', fontWeight: 'bold' }}>Fator de Risco:</span>
+                <span style={{ color: riskFactorColor }}>{riskFactor}</span>
+              </div>
+
+              {/* Linha Fator de Retenção */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ color: 'white', fontWeight: 'bold' }}>Fator de Retenção:</span>
+                <span style={{ color: '#1DB954' }}>{retentionFactor}</span>
+              </div>
+
+              {/* Action Recommended integrated here if available */}
+              {suggestedAction && (
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                  <span style={{ color: 'white', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Recomendação:</span>
+                  <span style={{ color: '#b3b3b3' }}>{suggestedAction}</span>
+                </div>
+              )}
+
+            </div>
           </div>
+        </div>
       )}
     </div>
   );
