@@ -27,6 +27,64 @@ const API_CONFIG = {
   password: import.meta.env.VITE_API_PASSWORD,
 };
 
+// Runtime credentials (can be seeded from env, or collected at runtime)
+const runtimeCredentials = {
+  username: API_CONFIG.username || null,
+  password: API_CONFIG.password || null,
+};
+
+/**
+ * Ensure we have credentials available. If not present from env, try sessionStorage,
+ * otherwise prompt the user once (kept only for the browser session).
+ */
+const ensureCredentials = () => {
+  if (runtimeCredentials.username && runtimeCredentials.password) return;
+
+  // Try to restore from sessionStorage (avoids prompting on every reload during a session)
+  try {
+    const stored = sessionStorage.getItem('churn_api_creds');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed && parsed.username && parsed.password) {
+        runtimeCredentials.username = parsed.username;
+        runtimeCredentials.password = parsed.password;
+        return;
+      }
+    }
+  } catch (e) {
+    // ignore sessionStorage errors
+  }
+
+  // As a last resort, prompt the user (format: username:password). This is intended for
+  // development / tunnel usage only. Credentials are kept in sessionStorage for convenience.
+  // We avoid using persistent storage for security reasons.
+  // Use a single prompt to simplify UX; user can cancel to abort.
+  if (typeof window !== 'undefined' && typeof prompt === 'function') {
+    const input = prompt('Informe suas credenciais para a API no formato username:password (válido apenas nesta sessão):');
+    if (!input) {
+      throw new Error('Credenciais da API não fornecidas');
+    }
+    const idx = input.indexOf(':');
+    if (idx <= 0) {
+      throw new Error('Formato inválido. Use username:password');
+    }
+    runtimeCredentials.username = input.slice(0, idx);
+    runtimeCredentials.password = input.slice(idx + 1);
+
+    try {
+      sessionStorage.setItem('churn_api_creds', JSON.stringify({
+        username: runtimeCredentials.username,
+        password: runtimeCredentials.password,
+      }));
+    } catch (e) {
+      // ignore storage errors
+    }
+
+    return;
+  }
+
+  throw new Error('Sem credenciais disponíveis para a API');
+};
 
 // =============================================================================
 // Internal Utilities
@@ -38,7 +96,12 @@ const API_CONFIG = {
  * @returns {string} Base64 encoded credentials
  */
 const getAuthHeader = () => {
-  const credentials = btoa(`${API_CONFIG.username}:${API_CONFIG.password}`);
+  // Ensure we have credentials from env or runtime prompt
+  if (!runtimeCredentials.username || !runtimeCredentials.password) {
+    ensureCredentials();
+  }
+
+  const credentials = btoa(`${runtimeCredentials.username}:${runtimeCredentials.password}`);
   return `Basic ${credentials}`;
 };
 
@@ -55,6 +118,9 @@ const fetchWithAuth = async (endpoint, options = {}) => {
 
   const response = await fetch(url, {
     ...options,
+    // explicit CORS mode for tunneled origins, and include credentials if cookies are used
+    mode: 'cors',
+    // credentials: 'include', // uncomment if you rely on cookies
     headers: {
       'Authorization': getAuthHeader(),
       'Content-Type': 'application/json',
@@ -63,11 +129,34 @@ const fetchWithAuth = async (endpoint, options = {}) => {
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Unknown error' }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    // Try to parse a JSON error body, otherwise return raw text to aid debugging
+    let errorBody;
+    try {
+      errorBody = await response.json();
+    } catch (e) {
+      try {
+        const text = await response.text();
+        errorBody = { message: text };
+      } catch (t) {
+        errorBody = { message: 'Unknown error' };
+      }
+    }
+
+    const message = (errorBody && (errorBody.message || errorBody.error || JSON.stringify(errorBody))) || `HTTP ${response.status}`;
+    const err = new Error(message);
+    err.status = response.status;
+    err.body = errorBody;
+    throw err;
   }
 
-  return response.json();
+  // Try to parse JSON, but tolerate empty responses
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return text;
+  }
 };
 
 // =============================================================================
@@ -264,8 +353,19 @@ export const uploadBatchFile = async (file) => {
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: 'Upload failed' }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    let errorBody;
+    try {
+      errorBody = await response.json();
+    } catch (e) {
+      try {
+        const text = await response.text();
+        errorBody = { message: text };
+      } catch (t) {
+        errorBody = { message: 'Upload failed' };
+      }
+    }
+
+    throw new Error(errorBody.message || `HTTP ${response.status}`);
   }
 
   return response.json();
