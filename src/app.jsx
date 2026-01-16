@@ -12,7 +12,13 @@
  */
 
 import Dashboard from './pages/Dashboard'
+import Footer from './components/Footer'
 
 export default function App() {
-  return <Dashboard />
+  return (
+    <>
+      <Dashboard />
+      <Footer />
+    </>
+  )
 }
