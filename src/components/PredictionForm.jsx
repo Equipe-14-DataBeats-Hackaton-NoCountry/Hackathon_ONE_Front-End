@@ -11,6 +11,8 @@
  * - Conversão explícita de tipos numéricos no envio (fix Postman vs Frontend)
  * - Tratamento de valores vazios/NaN
  * - Validação obrigatória de user_id no frontend (evita HTTP 400)
+ * - FIX CRÍTICO: Lógica de classificação de risco corrigida
+ * - FIX: Removida variável 'response' inexistente
  *
  * @component
  * @returns {JSX.Element} Formulário interativo com visualização de risco
@@ -19,7 +21,6 @@
 import { useState, useRef } from 'react';
 import { usePrediction } from '../hooks/usePrediction';
 import { Zap } from 'lucide-react';
-
 
 // --- ESTILOS (Dark Theme Spotify) ---
 const inputStyle = {
@@ -61,12 +62,6 @@ export function PredictionForm() {
   // Erro de validação do formulário (ex: user_id vazio)
   const [formError, setFormError] = useState(null);
 
-  // estilo do input do ID depende do formError, então precisa vir depois
-  const idInputStyle = {
-    ...inputStyle,
-    border: formError ? '1px solid #ff4d4d' : inputStyle.border,
-  };
-
   // Estado do formulário inicializado com valores padrão
   const [formData, setFormData] = useState({
     user_id: "",
@@ -81,6 +76,12 @@ export function PredictionForm() {
     ads_listened_per_week: 10,
     offline_listening: false,
   });
+
+  // estilo do input do ID depende do formError, então precisa vir depois
+  const idInputStyle = {
+    ...inputStyle,
+    border: formError ? '1px solid #ff4d4d' : inputStyle.border,
+  };
 
   /**
    * Handler para mudanças em campos do formulário.
@@ -135,9 +136,10 @@ export function PredictionForm() {
     console.log("📤 Payload Sanitizado:", JSON.stringify(payload, null, 2));
 
     try {
-      await predict(payload);
+      const apiResult = await predict(payload);
+      console.log("📥 Resultado da API:", apiResult);
     } catch (err) {
-      console.error("Erro na predição:", err);
+      console.error("❌ Erro na predição:", err);
     }
   };
 
@@ -145,7 +147,7 @@ export function PredictionForm() {
   //  LÓGICA DE APRESENTAÇÃO (VISUAL DASHBOARD)
   // =========================================================
 
-  // 1. Função auxiliar para traduzir termos técnicos
+  // Função auxiliar para traduzir termos técnicos
   const traduzir = (texto) => {
     if (!texto) return 'Desconhecido';
     const mapa = {
@@ -160,37 +162,31 @@ export function PredictionForm() {
     return mapa[texto] || texto.replace(/_/g, ' ');
   };
 
-  // 2. Preparação de dados (Fallback seguro)
   // Alguns backends retornam 'churn_probability' ou 'probability'
   const rawProbability =
     result?.probability !== undefined
       ? result.probability
       : (result?.churn_probability || 0);
 
-  // OBS: mantive seu clamp pra evitar 100% cravado no UI
+  // clamp apenas pro UI não cravar 100%
   const percentual = Math.min(rawProbability * 100, 99.9).toFixed(1) + '%';
-
-  // Utiliza threshold da API se disponível
-  const threshold = result?.decision_threshold || 0.5;
-  const isHighRisk = rawProbability > threshold;
-
-  // 3. Status vindo da API
-  // Prioriza 'prediction' (Insomnia) ou 'label'
-  const apiStatus = result?.prediction || result?.label;
-  const statusLabel = apiStatus || (isHighRisk ? 'Risco de Saída' : 'Cliente Seguro');
 
   // =========================================================
   //  CORES E NÍVEIS DE RISCO (Baixo / Moderado / Alto)
+  //  Fonte de verdade: faixas do produto (0-40 / 40-60 / 60-100)
+  //  FIX: Corrigida a lógica de classificação
   // =========================================================
+
   const STATUS_LOW = 'Baixo Risco de Cancelamento';
   const STATUS_MOD = 'Risco Moderado de Cancelamento';
   const STATUS_HIGH = 'Alto Risco de Cancelamento';
 
-  // Thresholds para faixa interpretativa (padrão produto)
-  // Alinhado com backend:
-  // >= 0.60 Alto | >= 0.40 Moderado | < 0.40 Baixo
-  const LOW_MAX = 0.40;  // 0% - 40%
-  const MOD_MAX = 0.60; // 40% - 60%  (a partir de 60% já é alto)
+  // Faixas do produto (definidas pelo backend) - REGRA DE NEGÓCIO
+  // 0-40% = Baixo | 40-60% = Moderado | 60-100% = Alto
+  const LOW_MAX = 0.40;   // 0% - 40%
+  const MOD_MIN = 0.40;   // 40% - 60%
+  const MOD_MAX = 0.60;   
+  const HIGH_MIN = 0.60;  // 60% - 100%
 
   const riskPalette = {
     low: { color: '#1DB954', bg: '#1DB95420', border: '#1DB954' },   // verde
@@ -199,43 +195,68 @@ export function PredictionForm() {
     unknown: { color: '#b3b3b3', bg: '#b3b3b320', border: '#333' }
   };
 
-  // Prioridade: texto do status (exato)
+  // risk_level da API (se existir) - aceitando formatos comuns
+  const apiRiskLevelRaw = result?.risk_level;
+  const apiRiskLevel = typeof apiRiskLevelRaw === 'string'
+    ? apiRiskLevelRaw.toLowerCase()
+    : null;
+
+  // Determinação do riskLevel:
+  // 1) se API mandar semanticamente, usa
+  // 2) senão, usa probabilidade nas faixas do produto
   let riskLevel = 'unknown';
 
-  if (statusLabel === STATUS_LOW) riskLevel = 'low';
-  else if (statusLabel === STATUS_MOD) riskLevel = 'mod';
-  else if (statusLabel === STATUS_HIGH) riskLevel = 'high';
-  else {
-    // Fallback: se não vier nesses textos, usa probabilidade
+  if (apiRiskLevel) {
+    if (apiRiskLevel.includes('low') || apiRiskLevel.includes('baixo')) {
+      riskLevel = 'low';
+    } else if (apiRiskLevel.includes('mod') || apiRiskLevel.includes('moder')) {
+      riskLevel = 'mod';
+    } else if (apiRiskLevel.includes('high') || apiRiskLevel.includes('alto')) {
+      riskLevel = 'high';
+    }
+  } else {
+    // FIX CRÍTICO: Lógica corrigida usando a probabilidade bruta (0-1)
     const p = rawProbability; // 0..1
-    if (p >= MOD_MAX) riskLevel = 'high';
-    else if (p >= LOW_MAX) riskLevel = 'mod';
-    else riskLevel = 'low';
+    
+    if (p < LOW_MAX) {
+      riskLevel = 'low';     // 0 - 0.399... = baixo
+    } else if (p < MOD_MAX) {
+      riskLevel = 'mod';     // 0.40 - 0.599... = moderado
+    } else {
+      riskLevel = 'high';    // 0.60+ = alto
+    }
+    
+    // Debug log para verificar classificação
+    console.log(`🎯 Classificação: ${(p * 100).toFixed(1)}% → ${riskLevel.toUpperCase()}`);
   }
+
+  // Status label padronizado (não depende do texto vindo da API)
+  const statusLabel =
+    riskLevel === 'low' ? STATUS_LOW :
+    riskLevel === 'mod' ? STATUS_MOD :
+    riskLevel === 'high' ? STATUS_HIGH :
+    'Risco Indefinido';
 
   const statusColor = riskPalette[riskLevel].color;
   const statusBorderColor = riskPalette[riskLevel].border;
   const statusBg = riskPalette[riskLevel].bg;
 
-  // Badge label (enterprise)
-  const badgeText = riskLevel === 'low'
-    ? 'BAIXO RISCO'
-    : riskLevel === 'mod'
-      ? 'RISCO MODERADO'
-      : riskLevel === 'high'
-        ? 'ALTO RISCO'
-        : 'INDEFINIDO';
+  // Badge label
+  const badgeText =
+    riskLevel === 'low' ? 'BAIXO RISCO' :
+    riskLevel === 'mod' ? 'RISCO MODERADO' :
+    riskLevel === 'high' ? 'ALTO RISCO' :
+    'INDEFINIDO';
 
-  // Faixa interpretativa abaixo da probabilidade (enterprise)
+  // Faixa interpretativa abaixo da probabilidade
   const faixaInterpretativa = riskLevel === 'low'
     ? `0–${Math.round(LOW_MAX * 100)}% → Baixo Risco`
     : riskLevel === 'mod'
-      ? `${Math.round(LOW_MAX * 100)}–${Math.round(MOD_MAX * 100)}% → Risco Moderado`
+      ? `${Math.round(MOD_MIN * 100)}–${Math.round(MOD_MAX * 100)}% → Risco Moderado`
       : riskLevel === 'high'
-        ? `${Math.round(MOD_MAX * 100)}–100% → Alto Risco`
+        ? `${Math.round(HIGH_MIN * 100)}–100% → Alto Risco`
         : 'Faixa não disponível';
 
-  // Badge style
   const badgeStyle = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -251,17 +272,15 @@ export function PredictionForm() {
     lineHeight: '1',
   };
 
-  // Acesso seguro ao diagnóstico da IA (novo formato JSON)
+  // Acesso seguro ao diagnóstico da IA
   const diagnosis = result?.ai_diagnosis || {};
 
   // =========================================================
-  //  FATOR DE RISCO / RETENÇÃO (AJUSTE DE CONSISTÊNCIA)
+  //  FATOR DE RISCO / RETENÇÃO (mantém sua regra de não alarmar baixo risco)
   // =========================================================
 
-  // Fator de risco (Pega da raiz ou do objeto de diagnóstico)
   const rawRiskFactor = result?.primary_risk_factor || diagnosis.primary_risk_factor;
 
-  // Regra: se for BAIXO risco, não faz sentido exibir fator "alarmista"
   const hasRiskFactorFromApi = !!rawRiskFactor;
   const showRiskFactorFromApi = (riskLevel === 'mod' || riskLevel === 'high') && hasRiskFactorFromApi;
 
@@ -269,19 +288,16 @@ export function PredictionForm() {
     ? traduzir(rawRiskFactor)
     : 'Nenhum fator de risco relevante identificado';
 
-  // Cor do fator de risco: segue semântica do nível (evita vermelho em baixo risco)
   const riskFactorColor =
     riskLevel === 'high' ? riskPalette.high.color :
     riskLevel === 'mod' ? riskPalette.mod.color :
-    '#b3b3b3'; // neutro para baixo/unknown
+    '#b3b3b3';
 
-  // Fator de retenção
   const rawRetentionFactor = diagnosis.primary_retention_factor;
   const retentionFactor = rawRetentionFactor
     ? traduzir(rawRetentionFactor)
     : (formData.offline_listening ? 'Uso Offline' : 'Nenhum fator relevante identificado');
 
-  // Ação sugerida
   const suggestedAction = result?.recommended_action || diagnosis.suggested_action;
 
   return (
@@ -443,13 +459,12 @@ export function PredictionForm() {
           marginTop: '30px',
           background: '#121212',
           borderRadius: '6px',
-          borderLeft: `6px solid ${statusBorderColor}`, // Borda indicativa
+          borderLeft: `6px solid ${statusBorderColor}`,
           padding: '25px',
           boxShadow: '0 4px 15px rgba(0,0,0,0.3)',
-          outline: `1px solid ${statusBg}` // realce sutil
+          outline: `1px solid ${statusBg}`
         }}>
 
-          {/* Título: Diagnóstico */}
           <h4 style={{
             color: statusColor,
             margin: '0 0 20px 0',
@@ -459,15 +474,12 @@ export function PredictionForm() {
             Diagnóstico: {formData.user_id || 'Cliente Anônimo'}
           </h4>
 
-          {/* Layout Flexbox: Esquerda (Probabilidade) vs Direita (Detalhes) */}
           <div style={{
             display: 'flex',
             flexWrap: 'wrap',
             gap: '30px',
             alignItems: 'center'
           }}>
-
-            {/* Coluna Esquerda: Probabilidade em destaque */}
             <div style={{ flex: '1', minWidth: '150px' }}>
               <p style={{ color: '#b3b3b3', fontSize: '0.9rem', marginBottom: '5px', fontWeight: 'bold' }}>
                 Probabilidade de Churn:
@@ -482,7 +494,6 @@ export function PredictionForm() {
                 {percentual}
               </div>
 
-              {/* Faixa interpretativa (enterprise) */}
               <div style={{
                 marginTop: '10px',
                 padding: '8px 10px',
@@ -498,7 +509,6 @@ export function PredictionForm() {
               </div>
             </div>
 
-            {/* Coluna Direita: Lista de Fatores */}
             <div style={{
               flex: '2',
               display: 'flex',
@@ -507,34 +517,28 @@ export function PredictionForm() {
               borderLeft: '1px solid #333',
               paddingLeft: '20px'
             }}>
-
-              {/* Linha Status + Badge */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                 <span style={{ color: 'white', fontWeight: 'bold' }}>Status:</span>
                 <span style={{ color: statusColor, fontWeight: 'bold' }}>{statusLabel}</span>
                 <span style={badgeStyle}>{badgeText}</span>
               </div>
 
-              {/* Linha Fator de Risco (CONSISTENTE E SEM VERMELHO EM BAIXO RISCO) */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ color: 'white', fontWeight: 'bold' }}>Fator de Risco:</span>
                 <span style={{ color: riskFactorColor }}>{riskFactor}</span>
               </div>
 
-              {/* Linha Fator de Retenção */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ color: 'white', fontWeight: 'bold' }}>Fator de Retenção:</span>
                 <span style={{ color: '#1DB954' }}>{retentionFactor}</span>
               </div>
 
-              {/* Action Recommended integrated here if available */}
               {suggestedAction && (
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
                   <span style={{ color: 'white', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Recomendação:</span>
                   <span style={{ color: '#b3b3b3' }}>{suggestedAction}</span>
                 </div>
               )}
-
             </div>
           </div>
         </div>
