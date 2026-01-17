@@ -10,14 +10,16 @@
  * Correções aplicadas:
  * - Conversão explícita de tipos numéricos no envio (fix Postman vs Frontend)
  * - Tratamento de valores vazios/NaN
+ * - Validação obrigatória de user_id no frontend (evita HTTP 400)
  *
  * @component
  * @returns {JSX.Element} Formulário interativo com visualização de risco
  */
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { usePrediction } from '../hooks/usePrediction';
 import { Zap } from 'lucide-react';
+
 
 // --- ESTILOS (Dark Theme Spotify) ---
 const inputStyle = {
@@ -52,7 +54,18 @@ const buttonStyle = {
 };
 
 export function PredictionForm() {
-  const { predict, loading, error, result } = usePrediction();
+  const { predict, loading, error, result, reset } = usePrediction();
+
+  const idInputRef = useRef(null);
+
+  // Erro de validação do formulário (ex: user_id vazio)
+  const [formError, setFormError] = useState(null);
+
+  // estilo do input do ID depende do formError, então precisa vir depois
+  const idInputStyle = {
+    ...inputStyle,
+    border: formError ? '1px solid #ff4d4d' : inputStyle.border,
+  };
 
   // Estado do formulário inicializado com valores padrão
   const [formData, setFormData] = useState({
@@ -76,6 +89,15 @@ export function PredictionForm() {
    */
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
+
+    if (name === 'user_id') {
+      // Qualquer interação que altere o ID invalida o resultado anterior
+      if (result || error) reset();
+
+      // Se existe erro local, some assim que o usuário mexer no campo
+      if (formError) setFormError(null);
+    }
+
     setFormData(prev => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : value
@@ -88,9 +110,20 @@ export function PredictionForm() {
    */
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setFormError(null);
+
+    // Validação obrigatória do user_id (evita HTTP 400)
+    const userId = (formData.user_id || "").trim();
+    if (!userId) {
+      reset(); // limpa resultado e erro da predição anterior
+      setFormError("Informe o ID do Usuário para realizar a predição.");
+      requestAnimationFrame(() => idInputRef.current?.focus());
+      return;
+    }
 
     const payload = {
       ...formData,
+      user_id: userId,
       age: Number(formData.age) || 0,
       listening_time: Number(formData.listening_time) || 0,
       songs_played_per_day: Number(formData.songs_played_per_day) || 0,
@@ -260,8 +293,18 @@ export function PredictionForm() {
 
           {/* User ID */}
           <div>
-            <label style={labelStyle}>ID do Usuário</label>
-            <input type="text" name="user_id" value={formData.user_id} onChange={handleChange} placeholder="Ex: user-12345" style={inputStyle} />
+            <label style={labelStyle}>
+              ID do Usuário <span style={{ color: '#ff4d4d' }}>*</span>
+            </label>
+            <input
+              type="text"
+              name="user_id"
+              ref={idInputRef}
+              value={formData.user_id}
+              onChange={handleChange}
+              placeholder="Ex: user-12345"
+              style={idInputStyle}
+            />
           </div>
 
           {/* Gender */}
@@ -366,8 +409,22 @@ export function PredictionForm() {
         </div>
       </form>
 
-      {/* Erro */}
-      {error && (
+      {/* Erro de validação local (prioridade) */}
+      {formError && (
+        <div style={{
+          marginTop: '20px',
+          padding: '15px',
+          background: '#ff4d4d20',
+          border: '1px solid #ff4d4d',
+          borderRadius: '4px',
+          color: '#ff4d4d'
+        }}>
+          ⚠️ {formError}
+        </div>
+      )}
+
+      {/* Erro da API (só aparece se não houver erro local) */}
+      {!formError && error && (
         <div style={{
           marginTop: '20px',
           padding: '15px',
@@ -458,7 +515,7 @@ export function PredictionForm() {
                 <span style={badgeStyle}>{badgeText}</span>
               </div>
 
-              {/* Linha Fator de Risco (AGORA CONSISTENTE E SEM VERMELHO EM BAIXO RISCO) */}
+              {/* Linha Fator de Risco (CONSISTENTE E SEM VERMELHO EM BAIXO RISCO) */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ color: 'white', fontWeight: 'bold' }}>Fator de Risco:</span>
                 <span style={{ color: riskFactorColor }}>{riskFactor}</span>
