@@ -202,6 +202,7 @@ export function useBatchProcessing() {
       setPolling(false);
     };
   }, [jobId]);
+  
 
   /**
    * Limpa todo o estado do job (jobId, status, error).
